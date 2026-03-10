@@ -156,8 +156,12 @@ def get_connection():
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA journal_mode = WAL")          # Write-ahead logging (concurrent reads)
+    conn.execute("PRAGMA busy_timeout = 5000")          # Wait up to 5s on lock contention
+    conn.execute("PRAGMA synchronous = NORMAL")         # Safe with WAL, ~10x faster than FULL
+    conn.execute("PRAGMA cache_size = -20000")           # 20MB memory cache (default is 2MB)
+    conn.execute("PRAGMA temp_store = MEMORY")           # Keep temp tables in RAM, not disk
+    conn.execute("PRAGMA mmap_size = 268435456")         # 256MB memory-mapped I/O
     return conn
 
 
@@ -2732,10 +2736,13 @@ def migrate_db():
     try:
         index_stmts = [
             "CREATE INDEX IF NOT EXISTS idx_order_items_status ON order_items(status)",
+            "CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id)",
             "CREATE INDEX IF NOT EXISTS idx_order_items_zone_id ON order_items(zone_id)",
             "CREATE INDEX IF NOT EXISTS idx_order_items_sku_id ON order_items(sku_id)",
             "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)",
             "CREATE INDEX IF NOT EXISTS idx_orders_client_id ON orders(client_id)",
+            "CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_orders_verified ON orders(is_verified)",
             "CREATE INDEX IF NOT EXISTS idx_schedule_entries_zone_id ON schedule_entries(zone_id)",
             "CREATE INDEX IF NOT EXISTS idx_schedule_entries_station_id ON schedule_entries(station_id)",
             "CREATE INDEX IF NOT EXISTS idx_schedule_entries_date ON schedule_entries(scheduled_date)",
@@ -2743,6 +2750,8 @@ def migrate_db():
             "CREATE INDEX IF NOT EXISTS idx_production_sessions_zone ON production_sessions(zone_id)",
             "CREATE INDEX IF NOT EXISTS idx_production_sessions_station ON production_sessions(station_id)",
             "CREATE INDEX IF NOT EXISTS idx_production_sessions_status ON production_sessions(status)",
+            "CREATE INDEX IF NOT EXISTS idx_production_sessions_item ON production_sessions(order_item_id)",
+            "CREATE INDEX IF NOT EXISTS idx_production_sessions_start ON production_sessions(start_time)",
             "CREATE INDEX IF NOT EXISTS idx_production_logs_session ON production_logs(session_id)",
             "CREATE INDEX IF NOT EXISTS idx_session_workers_session ON session_workers(session_id)",
             "CREATE INDEX IF NOT EXISTS idx_session_workers_user ON session_workers(user_id)",
@@ -2771,6 +2780,13 @@ def migrate_db():
             "CREATE INDEX IF NOT EXISTS idx_timber_packs_spec ON timber_packs(spec_id)",
             "CREATE INDEX IF NOT EXISTS idx_timber_packs_status ON timber_packs(status)",
             "CREATE INDEX IF NOT EXISTS idx_dispatch_runs_date ON dispatch_runs(run_date)",
+            "CREATE INDEX IF NOT EXISTS idx_notification_log_order ON notification_log(order_id)",
+            "CREATE INDEX IF NOT EXISTS idx_timber_packs_delivery ON timber_packs(delivery_item_id)",
+            "CREATE INDEX IF NOT EXISTS idx_timber_consumption_pack ON timber_consumption(pack_id)",
+            "CREATE INDEX IF NOT EXISTS idx_delivery_run_stages_dl ON delivery_run_stages(delivery_log_id)",
+            "CREATE INDEX IF NOT EXISTS idx_delivery_run_stages_shift ON delivery_run_stages(driver_shift_id)",
+            "CREATE INDEX IF NOT EXISTS idx_delivery_groups_order ON delivery_groups(order_id)",
+            "CREATE INDEX IF NOT EXISTS idx_delivery_group_items_group ON delivery_group_items(delivery_group_id)",
         ]
         for stmt in index_stmts:
             conn.execute(stmt)
