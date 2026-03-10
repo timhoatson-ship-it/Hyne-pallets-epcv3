@@ -152,16 +152,25 @@ def safe_int(val, default=0):
 # Database helpers
 # ---------------------------------------------------------------------------
 
+def _init_db_pragmas():
+    """Set one-time persistent PRAGMAs on the database file.
+    WAL mode and mmap_size persist across connections — no need to set per-request.
+    Called once at startup.
+    """
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA mmap_size = 268435456")         # 256MB memory-mapped I/O
+    conn.close()
+
+
 def get_connection():
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")          # Write-ahead logging (concurrent reads)
-    conn.execute("PRAGMA busy_timeout = 5000")          # Wait up to 5s on lock contention
-    conn.execute("PRAGMA synchronous = NORMAL")         # Safe with WAL, ~10x faster than FULL
-    conn.execute("PRAGMA cache_size = -20000")           # 20MB memory cache (default is 2MB)
-    conn.execute("PRAGMA temp_store = MEMORY")           # Keep temp tables in RAM, not disk
-    conn.execute("PRAGMA mmap_size = 268435456")         # 256MB memory-mapped I/O
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA cache_size = -20000")           # 20MB memory cache
+    conn.execute("PRAGMA temp_store = MEMORY")
     return conn
 
 
@@ -11882,6 +11891,7 @@ def dispatch(method, path, params, body, conn):
 # Always init DB on import (gunicorn imports the module, doesn't run __main__)
 init_db()
 migrate_db()
+_init_db_pragmas()  # Set WAL + mmap once, not per-connection
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
